@@ -4,6 +4,7 @@ import { Volunteers } from '../both/init'
 import { runFixtures } from '../imports/fixtures/index'
 import './email'
 import './migrations'
+import './rateLimiter'
 
 // startup function - MAIN
 

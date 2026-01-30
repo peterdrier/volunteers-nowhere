@@ -29,10 +29,16 @@ export function Magic({ user }) {
   useEffect(() => {
     let failureListener
     if (isLoaded && checkResult) {
-      if (checkResult.existingUser) {
-        Meteor.connection.setUserId(checkResult.existingUser._id)
+      if (checkResult.existingUser && checkResult.loginToken) {
+        // Use proper Accounts login with server-generated token
+        Meteor.loginWithToken(checkResult.loginToken, (loginErr) => {
+          if (loginErr) {
+            setError(loginErr)
+          }
+        })
+      } else if (checkResult.email) {
+        setEmail(checkResult.email)
       }
-      setEmail(checkResult.email)
       failureListener = Accounts.onLoginFailure(err => setError(err.error))
     }
     return () => failureListener?.stop()

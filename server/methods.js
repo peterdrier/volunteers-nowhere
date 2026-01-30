@@ -168,6 +168,47 @@ export const userStats = new ValidatedMethod({
 })
 
 const onlyFilled = { 'profile.formFilled': true }
+
+// Whitelist of allowed search fields to prevent NoSQL injection
+const ALLOWED_SEARCH_FIELDS = new Set([
+  'profile.firstName',
+  'profile.lastName',
+  'profile.nickname',
+  'ticketId',
+  '_id',
+])
+
+// Sanitize and validate search parameters to prevent NoSQL injection
+function sanitizeSearch(search) {
+  if (!search || typeof search !== 'object') {
+    return {}
+  }
+
+  const sanitized = {}
+  for (const [key, value] of Object.entries(search)) {
+    // Only allow whitelisted fields
+    if (!ALLOWED_SEARCH_FIELDS.has(key)) {
+      continue
+    }
+
+    // Handle $regex patterns safely - escape special regex chars from user input
+    if (value && typeof value === 'object' && value.$regex) {
+      if (typeof value.$regex !== 'string') {
+        continue // Skip invalid regex
+      }
+      // Escape regex special characters for literal matching
+      const escapedRegex = value.$regex.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      sanitized[key] = { $regex: escapedRegex, $options: 'i' }
+    } else if (typeof value === 'string' || typeof value === 'number') {
+      // Allow simple string/number equality matches
+      sanitized[key] = value
+    }
+    // Reject any other operators like $where, $gt, $ne, etc.
+  }
+
+  return sanitized
+}
+
 const userSearch = ({
   search,
   page,
@@ -175,7 +216,8 @@ const userSearch = ({
   isManager,
   includeIncomplete,
 }) => {
-  const query = !includeIncomplete ? { ...onlyFilled, ...search } : search
+  const sanitizedSearch = sanitizeSearch(search)
+  const query = !includeIncomplete ? { ...onlyFilled, ...sanitizedSearch } : sanitizedSearch
   // TODO We shouldn't need much here, now that the methods are separated we should remove
   // what we don't need for non-managers
   const fields = {
@@ -217,10 +259,33 @@ const userSearch = ({
   }
 }
 
+const userListSchema = new SimpleSchema({
+  search: {
+    type: Object,
+    optional: true,
+    blackbox: true, // We validate this separately in sanitizeSearch
+  },
+  page: {
+    type: SimpleSchema.Integer,
+    optional: true,
+    min: 1,
+  },
+  perPage: {
+    type: SimpleSchema.Integer,
+    optional: true,
+    min: 1,
+    max: 100, // Prevent DoS via huge page sizes
+  },
+  includeIncomplete: {
+    type: Boolean,
+    optional: true,
+  },
+})
+
 export const userList = new ValidatedMethod({
   name: 'users.paged',
   mixins: [authMixins.isAnyLead],
-  validate: () => {},
+  validate: userListSchema.validator(),
   run({
     search,
     page,
@@ -239,7 +304,7 @@ export const userList = new ValidatedMethod({
 export const userListManager = new ValidatedMethod({
   name: 'users.paged.manager',
   mixins: [authMixins.isManager],
-  validate: () => {},
+  validate: userListSchema.validator(),
   run({
     search,
     page,
@@ -416,7 +481,9 @@ export const teamRotaData = new ValidatedMethod({
 export const deptRotaData = new ValidatedMethod({
   name: 'dept.rota',
   mixins: [authMixins.isLead],
-  validate: null,
+  validate({ parentId }) {
+    check(parentId, String)
+  },
   run({ parentId }) {
     return _.flatten(
       Volunteers.collections.team.find({ parentId })
@@ -467,7 +534,9 @@ function mapEECsvExport({
 export const eeCsvData = new ValidatedMethod({
   name: 'ee.csv',
   mixins: [authMixins.isLead],
-  validate: null,
+  validate({ parentId }) {
+    check(parentId, String)
+  },
   run({ parentId }) {
     const eventSettings = EventSettings.findOne()
     const { end: buildEnd } = eventSettings.buildPeriod
@@ -833,7 +902,13 @@ export const newEventMigration = new ValidatedMethod({
 export const allRotaExport = new ValidatedMethod({
   name: 'rota.all.export',
   mixins: [authMixins.isManager],
-  validate: null,
+  validate({ eventName }) {
+    check(eventName, String)
+    // Validate event name format to prevent injection
+    if (!/^[a-zA-Z0-9_-]+$/.test(eventName)) {
+      throw new Meteor.Error(400, 'Invalid event name format')
+    }
+  },
   run({ eventName }) {
     const sourceEvent = new VolunteersClass(eventName, true)
     // This is weird as this one isn't part of the 'volunteers' class, so we can't
@@ -1239,7 +1314,9 @@ export const cantinaSetupData = new ValidatedMethod({
 export const getEmptyShifts = new ValidatedMethod({
   name: 'shifts.empty',
   mixins: [isNoInfoMixin],
-  validate: null,
+  validate(day) {
+    check(day, Date)
+  },
   run(day) {
     return Volunteers.collections.shift.aggregate([
       {
@@ -1283,6 +1360,47 @@ export const getEmptyShifts = new ValidatedMethod({
   },
 })
 
+// Method for leads to request user contact info with audit logging
+export const requestUserContact = new ValidatedMethod({
+  name: 'users.requestContact',
+  mixins: [authMixins.isAnyLead],
+  validate({ userId, reason }) {
+    check(userId, String)
+    check(reason, String)
+    if (reason.length < 10) {
+      throw new Meteor.Error(400, 'Please provide a reason for accessing contact info (min 10 chars)')
+    }
+  },
+  run({ userId, reason }) {
+    const requestingUser = Meteor.user()
+    const targetUser = Meteor.users.findOne(userId)
+
+    if (!targetUser) {
+      throw new Meteor.Error(404, 'User not found')
+    }
+
+    // Log the access request for audit purposes
+    console.log('[AUDIT] Contact info access:', {
+      timestamp: new Date().toISOString(),
+      requestedBy: {
+        userId: requestingUser._id,
+        name: displayName(requestingUser),
+      },
+      targetUserId: userId,
+      reason,
+    })
+
+    // Return only the primary email
+    const primaryEmail = targetUser.emails?.find(e => e.verified)?.address
+      || targetUser.emails?.[0]?.address
+
+    return {
+      email: primaryEmail,
+      name: displayName(targetUser),
+    }
+  },
+})
+
 export const checkFistbumpHash = new ValidatedMethod({
   name: 'accounts.fistbump.check',
   mixins: [],
@@ -1293,8 +1411,25 @@ export const checkFistbumpHash = new ValidatedMethod({
     if (result.email) {
       const existingUser = Meteor.users.findOne({ 'emails.address': result.email })
       if (existingUser) {
-        this.setUserId(existingUser._id)
-        return { existingUser }
+        // Check if this hash was already used for login (prevent replay attacks)
+        if (existingUser.fistbumpHashUsed === hash) {
+          throw new Meteor.Error(400, 'This magic link has already been used. Please request a new one.')
+        }
+
+        // Generate a proper login token instead of using setUserId directly
+        const stampedToken = Accounts._generateStampedLoginToken()
+        Accounts._insertLoginToken(existingUser._id, stampedToken)
+
+        // Mark this hash as used to prevent replay attacks
+        Meteor.users.update(existingUser._id, {
+          $set: { fistbumpHashUsed: hash },
+        })
+
+        return {
+          existingUser: true,
+          userId: existingUser._id,
+          loginToken: stampedToken.token,
+        }
       }
     }
     return result

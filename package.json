@@ -13,13 +13,12 @@
     "bcrypt": "^5.1.0",
     "bootstrap": "^4.6.2",
     "bootstrap-select": "^1.13.18",
-    "chart.js": "^2.9.4",
     "file-saver": "^2.0.5",
     "flatpickr": "^4.6.13",
     "formik": "^2.2.9",
     "jquery": "^3.6.3",
     "json2csv": "^4.5.4",
-    "meteor-node-stubs": "^0.4.1",
+    "meteor-node-stubs": "^1.2.25",
     "moment": "^2.29.4",
     "moment-range": "^4.0.2",
     "moment-timezone": "^0.5.41",
@@ -35,7 +34,7 @@
     "react-select": "^3.2.0",
     "simpl-schema": "^1.13.1",
     "underscore": "^1.13.6",
-    "webpack": "^5.75.0"
+    "webpack": "^5.104.1"
   },
   "devDependencies": {
     "@meteorjs/eslint-config-meteor": "^1.0.5",

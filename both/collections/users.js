@@ -62,7 +62,14 @@ export const userSchema = new SimpleSchema({
     type: Number,
     optional: true,
   },
+  // Token received from Fistbump API during magic link signup
+  // Verified against external API, not stored for local verification
   fistbumpHash: {
+    type: String,
+    optional: true,
+  },
+  // Tracks which hash was used for login to prevent replay attacks
+  fistbumpHashUsed: {
     type: String,
     optional: true,
   },
@@ -86,6 +93,8 @@ export const userSchema = new SimpleSchema({
     optional: true,
     defaultValue: false,
   },
+  // Token for admin impersonation feature (if implemented)
+  // TODO: Hash this token if impersonation is enabled
   _impersonateToken: {
     type: String,
     optional: true,
